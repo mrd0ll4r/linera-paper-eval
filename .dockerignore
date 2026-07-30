@@ -1,0 +1,13 @@
+# Ignore everything by default
+*
+
+# Include useful things
+!src/**
+!scripts/**
+!Cargo.toml
+!Cargo.lock
+
+# Maybe re-ignore a few things?
+**/*.swp
+**/*.swo
+*.log

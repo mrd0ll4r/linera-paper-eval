@@ -1,0 +1,59 @@
+# An image to build the linera-paper-eval binary
+# and run it against a Linera testnet within Docker.
+FROM linera-paper-eval-builder-base AS builder
+
+ARG CARGO_PROFILE_FLAG=""
+ARG TARGET_DIR="debug"
+
+WORKDIR /src
+
+COPY . .
+
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/src/target \
+    --mount=type=cache,target=/sccache \
+    cargo build ${CARGO_PROFILE_FLAG} \
+    --locked \
+    && mkdir -p /out \
+    && cp /src/target/${TARGET_DIR}/linera-paper-eval /out/
+
+FROM debian:bookworm-slim AS runtime
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        bash \
+        ca-certificates \
+        curl \
+        libgcc-s1 \
+        libssl3 \
+        libstdc++6 \
+        procps \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /out/linera /usr/local/bin/linera
+COPY --from=builder /out/linera-server /usr/local/bin/linera-server
+COPY --from=builder /out/linera-proxy /usr/local/bin/linera-proxy
+COPY --from=builder /out/linera-storage-server /usr/local/bin/linera-storage-server
+COPY scripts/linera-paper-eval-entrypoint.sh /usr/local/bin/linera-paper-eval-entrypoint.sh
+COPY scripts/set_up_node_and_wallet.sh /usr/local/bin/set_up_node_and_wallet.sh
+COPY --from=builder /out/linera-paper-eval /usr/local/bin/linera-paper-eval
+
+RUN chmod +x \
+      /usr/local/bin/linera \
+      /usr/local/bin/linera-storage-server \
+      /usr/local/bin/linera-paper-eval \
+      /usr/local/bin/linera-paper-eval-entrypoint.sh
+
+RUN mkdir -p /data_out \
+    && chown 1000:1000 /data_out \
+    && mkdir -p /data_in \
+    && chown 1000:1000 /data_in \
+    && mkdir -p /linera \
+    && chown 1000:1000 /linera
+
+WORKDIR /linera
+
+USER 1000
+
+CMD ["/usr/local/bin/linera-paper-eval-entrypoint.sh"]

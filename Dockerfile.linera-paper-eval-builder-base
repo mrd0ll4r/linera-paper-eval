@@ -1,0 +1,65 @@
+# An environment for building the paper evaluation binaries.
+# Contains the OS-level dependencies and the Rust toolchain,
+# as well as compiled Linera binaries to set up a network.
+# Compiled binaries are copied to /out.
+FROM rust:1.95.0-bookworm AS builder
+
+ARG PROTOC_VERSION=21.11
+ARG PROTOC_ZIP=protoc-21.11-linux-x86_64.zip
+ARG LINERA_GIT_REV="d8dd22d7e0c3363fdd6d964bccc7a92ca94238e9"
+
+# These are optionally overridden by the build script.
+ARG CARGO_PROFILE_FLAG=""
+ARG TARGET_DIR="debug"
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        clang \
+        cmake \
+        curl \
+        g++ \
+        git \
+        libclang-dev \
+        libssl-dev \
+        make \
+        lld \
+        pkg-config \
+        unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl --fail --location --output "/tmp/${PROTOC_ZIP}" \
+        "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/${PROTOC_ZIP}" \
+    && unzip "/tmp/${PROTOC_ZIP}" -d /usr/local \
+    && rm "/tmp/${PROTOC_ZIP}" \
+    && protoc --version
+
+RUN cargo install sccache --locked
+
+ENV RUSTC_WRAPPER=sccache
+ENV SCCACHE_DIR=/sccache
+
+WORKDIR /
+RUN git clone https://github.com/linera-io/linera-protocol.git linera-src
+WORKDIR /linera-src
+RUN git checkout ${LINERA_GIT_REV}
+
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/src/target \
+    --mount=type=cache,target=/sccache \
+    cargo build ${CARGO_PROFILE_FLAG} \
+    --locked \
+    --config profile.release.debug=false \
+    --features opentelemetry \
+    -p linera-service \
+    --bin linera \
+    --bin linera-server \
+    --bin linera-proxy \
+    -p linera-storage-service \
+    --bin linera-storage-server \
+    && mkdir -p /out \
+    && cp /linera-src/target/${TARGET_DIR}/linera /out/ \
+    && cp /linera-src/target/${TARGET_DIR}/linera-server /out/ \
+    && cp /linera-src/target/${TARGET_DIR}/linera-proxy /out/ \
+    && cp /linera-src/target/${TARGET_DIR}/linera-storage-server /out/
